@@ -1,20 +1,17 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Data;
 using System.Linq;
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
-using System.Threading.Tasks;
 using System.Web.Http;
-using System.Web.Http.Description;
 using ExpensesApp.Models;
-using System.Linq.Expressions;
-using System.Data.SqlClient;
 using System.Configuration;
 using Dapper;
 using Npgsql;
 using System.Web.Services.Description;
 using BCrypt.Net;
+using JWT.Algorithms;
+using JWT.Builder;
 
 namespace ExpensesApp.Controllers
 {
@@ -27,11 +24,9 @@ namespace ExpensesApp.Controllers
         {
             using (NpgsqlConnection connection = new NpgsqlConnection(ConfigurationManager.ConnectionStrings["DB_CONNECTION"]?.ConnectionString))
             {
-                IEnumerable<User> users = connection.Query<User>("SELECT name, email FROM users");
+                IEnumerable<User> users = connection.Query<User>("SELECT id, name, email FROM users");
 
-                HttpResponseMessage response = Request.CreateResponse(HttpStatusCode.OK, users);
-
-                return response;
+                return Request.CreateResponse(HttpStatusCode.OK, users);
             }
         }
 
@@ -41,13 +36,9 @@ namespace ExpensesApp.Controllers
         {
             using (NpgsqlConnection connection = new NpgsqlConnection(ConfigurationManager.ConnectionStrings["DB_CONNECTION"]?.ConnectionString))
             {
-                HttpResponseMessage response;
-
                 if (string.IsNullOrEmpty(user.Name) || string.IsNullOrEmpty(user.Email) || string.IsNullOrEmpty(user.Password))
                 {
-                    response = Request.CreateResponse(HttpStatusCode.BadRequest, new { Message = "E-mail, Name or Password not provided." });
-
-                    return response;
+                    return Request.CreateResponse(HttpStatusCode.BadRequest, new { Message = "E-mail, Name or Password not provided." });
                 }
 
                 // Verify if email is already registered
@@ -55,9 +46,7 @@ namespace ExpensesApp.Controllers
 
                 if (registeredUser != null)
                 {
-                    response = Request.CreateResponse(HttpStatusCode.BadRequest, new { Message = "E-mail already registered." });
-
-                    return response;
+                    return Request.CreateResponse(HttpStatusCode.BadRequest, new { Message = "E-mail already registered." });
                 }
 
                 // Hashing password
@@ -65,10 +54,60 @@ namespace ExpensesApp.Controllers
 
                 connection.Execute("INSERT INTO users (name, email, password) VALUES (@Name, @Email, @Password);", new { Name = user.Name, Email = user.Email, Password = passwordHash });
 
-                response = Request.CreateResponse(HttpStatusCode.Created);
-
-                return response;
+                return Request.CreateResponse(HttpStatusCode.Created);
             }
+        }
+
+        [Route("login")]
+        [HttpPost]
+        public HttpResponseMessage Login([FromBody] User requestBody)
+        {
+            using (NpgsqlConnection connection = new NpgsqlConnection(ConfigurationManager.ConnectionStrings["DB_CONNECTION"]?.ConnectionString))
+            {
+                string email = requestBody.Email;
+                string password = requestBody.Password;
+
+                if (string.IsNullOrEmpty(email) || string.IsNullOrEmpty(password))
+                {
+                    return Request.CreateResponse(HttpStatusCode.BadRequest, new { Message = "E-mail Password not provided." });
+                }
+
+                // Verify if user exists
+                User user = connection.QueryFirstOrDefault<User>("SELECT * FROM users WHERE email = @Email", new { Email = email });
+
+                if (user == null)
+                {
+                    return Request.CreateResponse(HttpStatusCode.BadRequest, new { Message = "E-mail or Password incorrect."});
+                } 
+
+                // Verify password is correct
+                bool isPasswordCorrect = BCrypt.Net.BCrypt.Verify(password, user.Password);
+
+                if (!isPasswordCorrect)
+                {
+                    return Request.CreateResponse(HttpStatusCode.BadRequest, new { Message = "E-mail or Password incorrect.", User = user });
+                }
+
+                string token = GenerateToken(user.Id);
+
+                return Request.CreateResponse(HttpStatusCode.OK, token);
+            }
+        }
+
+        private string GenerateToken(int userId)
+        {
+            // TODO: create secret and store securely
+            string secret = "GQDstcKsx0NHjPOuXOYg5MbeJ1XT0uFiwDVvVBrk";
+
+            // Generate token
+            string token = new JwtBuilder()
+              .WithAlgorithm(new HMACSHA256Algorithm()) 
+              .WithSecret(secret)
+              .AddClaim("exp", DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds())
+              .AddClaim("userId", userId.ToString())
+              .Encode();
+
+            return token;
         }
     }
 
