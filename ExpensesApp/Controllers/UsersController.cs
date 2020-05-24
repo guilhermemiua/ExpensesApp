@@ -10,11 +10,11 @@ using Dapper;
 using Npgsql;
 using System.Web.Services.Description;
 using BCrypt.Net;
-using JWT.Algorithms;
-using JWT.Builder;
+using ExpensesApp.DTOs;
 
 namespace ExpensesApp.Controllers
 {
+    [Authorize]
     [RoutePrefix("api/users")]
     public class UsersController : ApiController
     {
@@ -56,58 +56,6 @@ namespace ExpensesApp.Controllers
 
                 return Request.CreateResponse(HttpStatusCode.Created);
             }
-        }
-
-        [Route("login")]
-        [HttpPost]
-        public HttpResponseMessage Login([FromBody] User requestBody)
-        {
-            using (NpgsqlConnection connection = new NpgsqlConnection(ConfigurationManager.ConnectionStrings["DB_CONNECTION"]?.ConnectionString))
-            {
-                string email = requestBody.Email;
-                string password = requestBody.Password;
-
-                if (string.IsNullOrEmpty(email) || string.IsNullOrEmpty(password))
-                {
-                    return Request.CreateResponse(HttpStatusCode.BadRequest, new { Message = "E-mail Password not provided." });
-                }
-
-                // Verify if user exists
-                User user = connection.QueryFirstOrDefault<User>("SELECT * FROM users WHERE email = @Email", new { Email = email });
-
-                if (user == null)
-                {
-                    return Request.CreateResponse(HttpStatusCode.BadRequest, new { Message = "E-mail or Password incorrect."});
-                } 
-
-                // Verify password is correct
-                bool isPasswordCorrect = BCrypt.Net.BCrypt.Verify(password, user.Password);
-
-                if (!isPasswordCorrect)
-                {
-                    return Request.CreateResponse(HttpStatusCode.BadRequest, new { Message = "E-mail or Password incorrect.", User = user });
-                }
-
-                string token = GenerateToken(user.Id);
-
-                return Request.CreateResponse(HttpStatusCode.OK, token);
-            }
-        }
-
-        private string GenerateToken(int userId)
-        {
-            // TODO: create secret and store securely
-            string secret = "GQDstcKsx0NHjPOuXOYg5MbeJ1XT0uFiwDVvVBrk";
-
-            // Generate token
-            string token = new JwtBuilder()
-              .WithAlgorithm(new HMACSHA256Algorithm()) 
-              .WithSecret(secret)
-              .AddClaim("exp", DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds())
-              .AddClaim("userId", userId.ToString())
-              .Encode();
-
-            return token;
         }
     }
 
